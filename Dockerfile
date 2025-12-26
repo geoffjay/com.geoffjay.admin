@@ -1,15 +1,32 @@
+# Build stage
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates
+
+# Copy Go module files
+COPY go.mod go.sum* ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY main.go ./
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -o pocketbase-custom .
+
+# Runtime stage
 FROM alpine:latest
 
-ARG PB_VERSION=0.35.0
+RUN apk add --no-cache ca-certificates
 
-RUN apk add --no-cache \
-  unzip \
-  ca-certificates
+WORKDIR /pb
 
-# download and unzip PocketBase
-ADD https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip /tmp/pb.zip
-
-RUN unzip /tmp/pb.zip -d /pb/
+# Copy built binary
+COPY --from=builder /build/pocketbase-custom /pb/pocketbase
 
 # uncomment to copy the local pb_migrations dir into the image
 # COPY ./pb_migrations /pb/pb_migrations

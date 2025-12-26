@@ -8,6 +8,10 @@ primary_region = 'ord'
 
 [build]
 
+[env]
+  # Tell Pocketbase to trust Fly proxy headers
+  PB_TRUSTED_PROXY = "true"
+
 [http_service]
   internal_port = 8090
   force_https = true

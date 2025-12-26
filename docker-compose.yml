@@ -1,0 +1,10 @@
+services:
+  pocketbase:
+    container_name: pocketbase
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/pb/pb_data

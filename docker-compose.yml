@@ -12,3 +12,8 @@ services:
       # For local testing, allow all IPs (or comment out to test IP filtering)
       # In production, this will be set via Fly.io secrets
       - ALLOWED_HOME_IP=0.0.0.0/0
+    networks:
+      - geoffjay-com
+networks:
+  geoffjay-com:
+    external: true

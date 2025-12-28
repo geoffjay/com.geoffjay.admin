@@ -3,6 +3,7 @@
 ## Overview
 
 This Pocketbase instance is configured with IP-based access control that restricts access to:
+
 1. **Fly.io Private Network (6PN)** - Other Fly.io apps in the organization
 2. **Authorized Home IP** - A specific IP address configured via Fly.io secrets
 
@@ -52,7 +53,9 @@ The solution uses a custom Pocketbase build with Go middleware that filters requ
 ### Files Created
 
 #### `main.go`
+
 Custom Pocketbase application with IP filtering middleware:
+
 - Hooks into Pocketbase's `OnServe()` event
 - Adds request filtering before routing
 - Checks client IP via `RealIP()` (respects proxy headers)
@@ -62,7 +65,9 @@ Custom Pocketbase application with IP filtering middleware:
 - Returns 403 Forbidden for unauthorized IPs
 
 #### `go.mod`
+
 Go module definition:
+
 ```go
 module github.com/geoffjay/admin
 go 1.23
@@ -72,21 +77,26 @@ require github.com/pocketbase/pocketbase v0.35.0
 ### Files Modified
 
 #### `Dockerfile`
+
 Changed from prebuilt binary download to multi-stage Go build:
 
 **Build Stage:**
+
 - Uses `golang:1.23-alpine` image
 - Installs build dependencies (git, ca-certificates)
 - Copies Go module files and downloads dependencies
 - Builds custom Pocketbase binary with IP filtering
 
 **Runtime Stage:**
+
 - Uses minimal `alpine:latest` image
 - Copies only the compiled binary
 - Results in small, efficient container
 
 #### `fly.toml`
+
 Added environment configuration:
+
 ```toml
 [env]
   PB_TRUSTED_PROXY = "true"
@@ -95,7 +105,9 @@ Added environment configuration:
 This tells Pocketbase to trust the `Fly-Client-IP` header from Fly's proxy, ensuring accurate client IP detection.
 
 #### `docker-compose.yml`
+
 Added environment variable for local testing:
+
 ```yaml
 environment:
   - ALLOWED_HOME_IP=127.0.0.1
@@ -136,7 +148,30 @@ flyctl secrets set ALLOWED_HOME_IP="203.0.113.0/24" --app com-geoffjay-admin
 flyctl secrets set ALLOWED_HOME_IP="203.0.113.42/32" --app com-geoffjay-admin
 ```
 
-### Step 2: Deploy Application
+### Step 2: Create Persistent Volume
+
+Pocketbase stores data in SQLite databases. To persist data across machine restarts, create a Fly.io volume:
+
+```bash
+flyctl volumes create pb_data --region ord --size 1 --app com-geoffjay-admin -y
+```
+
+**Important:** Fly.io volumes are pinned to specific physical hosts. For production high-availability:
+
+- Consider creating 2+ volumes in different zones
+- Fly.io will automatically handle machine placement with volumes
+
+The `fly.toml` configuration already includes the mount point:
+
+```toml
+[mounts]
+  source = "pb_data"
+  destination = "/pb/pb_data"
+```
+
+This mounts the volume to `/pb/pb_data`, where Pocketbase stores its databases.
+
+### Step 3: Deploy Application
 
 Deploy the updated application to Fly.io:
 
@@ -145,12 +180,14 @@ flyctl deploy --app com-geoffjay-admin
 ```
 
 The build process will:
+
 1. Compile the custom Pocketbase application
 2. Create a multi-stage Docker image
 3. Deploy to your Fly.io app
-4. Start the service with IP filtering enabled
+4. Mount the persistent volume
+5. Start the service with IP filtering enabled
 
-### Step 3: Verify Deployment
+### Step 4: Verify Deployment
 
 Check deployment status:
 
@@ -222,7 +259,9 @@ docker compose up -d
 curl http://localhost:8090/api/health
 ```
 
-**Note:** The `docker-compose.yml` file sets `ALLOWED_HOME_IP=0.0.0.0/0` for local testing, which allows all IPs. This is because Docker's bridge networking means the container sees requests from the Docker gateway IP, not `127.0.0.1`. In production on Fly.io, you'll set your actual home IP via secrets.
+**Note:** The `docker-compose.yml` file sets `ALLOWED_HOME_IP=0.0.0.0/0` for local testing, which allows all IPs. This
+is because Docker's bridge networking means the container sees requests from the Docker gateway IP, not `127.0.0.1`. In
+production on Fly.io, you'll set your actual home IP via secrets.
 
 ## Operations
 
@@ -235,6 +274,7 @@ flyctl secrets set ALLOWED_HOME_IP="NEW_IP_ADDRESS" --app com-geoffjay-admin
 ```
 
 **Important Notes:**
+
 - Secret updates trigger a machine restart (approximately 30 seconds downtime)
 - No redeployment needed - change takes effect immediately after restart
 - Old IP is blocked as soon as the machine restarts with new secret
@@ -246,6 +286,41 @@ List configured secrets (values are hidden):
 ```bash
 flyctl secrets list --app com-geoffjay-admin
 ```
+
+### Managing Volumes
+
+**List volumes:**
+
+```bash
+flyctl volumes list --app com-geoffjay-admin
+```
+
+**Check volume usage:**
+
+```bash
+flyctl ssh console --app com-geoffjay-admin -C "df -h /pb/pb_data"
+```
+
+**Extend volume size:**
+
+```bash
+flyctl volumes extend <volume-id> --size 3 --app com-geoffjay-admin
+```
+
+**Create volume snapshot (backup):**
+Fly.io automatically creates snapshots (retention: 5 days by default). To manually create:
+
+```bash
+flyctl volumes snapshots create <volume-id> --app com-geoffjay-admin
+```
+
+**Important Notes:**
+
+- Data persists across machine restarts and redeployments
+- Volumes are automatically backed up with snapshots
+- For high availability, create multiple volumes in different zones
+- Volumes cannot be resized down, only extended
+- **After initial volume setup:** You'll need to recreate your superuser account since the new volume starts empty
 
 ### Monitoring Access Attempts
 
@@ -260,11 +335,13 @@ flyctl logs --app com-geoffjay-admin | grep "Access denied"
 ```
 
 Denied access attempts are logged with:
+
 - Source IP address
 - Requested path
 - Timestamp
 
 Example log entry:
+
 ```
 Access denied from IP: 198.51.100.42, Path: /api/collections
 ```
@@ -302,11 +379,13 @@ flyctl secrets set ALLOWED_HOME_IP="0.0.0.0/0" --app com-geoffjay-admin
 When a new Pocketbase version is released:
 
 1. Update `go.mod`:
+
    ```go
    require github.com/pocketbase/pocketbase v0.36.0  // New version
    ```
 
 2. Test locally:
+
    ```bash
    docker compose build
    docker compose up
@@ -332,11 +411,13 @@ IP filtering is **one layer** of security, not the only layer:
 ### IP Filtering Limitations
 
 **What IP filtering protects against:**
+
 - Unauthorized public internet access
 - Random scanning and bots
 - Accidental public exposure
 
 **What IP filtering does NOT protect against:**
+
 - Compromised credentials (still need strong passwords)
 - Attacks from allowed IPs (6PN or home IP)
 - Application vulnerabilities (XSS, SQL injection, etc.)
@@ -344,21 +425,25 @@ IP filtering is **one layer** of security, not the only layer:
 ### Best Practices
 
 1. **Strong Admin Passwords**
+
    - Use a password manager
    - Enable 2FA if available in Pocketbase
    - Rotate credentials regularly
 
 2. **IP Management**
+
    - Document your home IP in a secure location
    - Use CIDR /32 for single IP (more explicit)
    - Consider dynamic DNS if home IP changes frequently
 
 3. **Secret Management**
+
    - Never commit `ALLOWED_HOME_IP` to version control
    - Use Fly.io secrets for sensitive configuration
    - Limit access to Fly.io account/organization
 
 4. **Monitoring**
+
    - Set up Fly.io metrics and alerts
    - Monitor for repeated 403 errors (potential attacks)
    - Review logs regularly
@@ -371,17 +456,20 @@ IP filtering is **one layer** of security, not the only layer:
 ### Network Architecture Notes
 
 **Public IPs Maintained:**
+
 - The app retains public IPv4 and IPv6 addresses
 - Required for home IP access from public internet
 - Fly.io proxy handles SSL termination and DDoS protection
 
 **6PN (Private Network):**
+
 - Uses Fly.io's IPv6 private network (`fdaa::/48`)
 - Only accessible to apps in your organization
 - No public internet routing
 - Use `.internal` DNS for 6PN access
 
 **Hybrid Access Model:**
+
 - Combines private network benefits with selective public access
 - More flexible than VPN-only or fully public
 - Trade-off: Application-level filtering vs. network-level isolation
@@ -391,11 +479,13 @@ IP filtering is **one layer** of security, not the only layer:
 ### Problem: 403 Forbidden from Home IP
 
 **Possible causes:**
+
 1. Home IP changed (dynamic IP from ISP)
 2. `ALLOWED_HOME_IP` secret not set or incorrect
 3. Accessing via VPN or proxy (different IP)
 
 **Solutions:**
+
 ```bash
 # Check your current IP
 curl ifconfig.me
@@ -410,11 +500,13 @@ flyctl secrets list --app com-geoffjay-admin
 ### Problem: 6PN Access Not Working
 
 **Possible causes:**
+
 1. Using wrong DNS name (should use `.internal`)
 2. Apps in different organizations
 3. Network connectivity issues
 
 **Solutions:**
+
 ```bash
 # Verify app organization
 flyctl apps list --org YOUR_ORG
@@ -429,11 +521,13 @@ flyctl status --app com-geoffjay-admin
 ### Problem: Build Fails on Deployment
 
 **Possible causes:**
+
 1. Go module download issues
 2. Network connectivity during build
 3. Invalid Go syntax
 
 **Solutions:**
+
 ```bash
 # Test build locally
 docker compose build
@@ -448,11 +542,13 @@ flyctl deploy --app com-geoffjay-admin --verbose
 ### Problem: Application Not Starting
 
 **Possible causes:**
+
 1. Invalid `ALLOWED_HOME_IP` format
 2. Pocketbase data migration issues
 3. Port binding conflicts
 
 **Solutions:**
+
 ```bash
 # Check application logs
 flyctl logs --app com-geoffjay-admin
@@ -504,6 +600,7 @@ func isAllowedIP(e *core.RequestEvent) bool {
 ```
 
 Then set multiple IPs:
+
 ```bash
 flyctl secrets set ALLOWED_HOME_IP="203.0.113.42,198.51.100.10" --app com-geoffjay-admin
 ```
@@ -577,17 +674,20 @@ func isAllowedIP(e *core.RequestEvent) bool {
 If you later decide to make the app fully private (6PN only):
 
 1. Remove public IP addresses:
+
    ```bash
    flyctl ips list --app com-geoffjay-admin
    flyctl ips release <IP_ADDRESS> --app com-geoffjay-admin
    ```
 
 2. Use Flycast for private networking:
+
    ```bash
    flyctl ips allocate-v6 --private --app com-geoffjay-admin
    ```
 
 3. Update `fly.toml` to disable public service:
+
    ```toml
    [[services]]
      internal_port = 8090
@@ -612,6 +712,7 @@ If you later decide to make the app fully private (6PN only):
 ## Support
 
 For issues or questions:
+
 1. Check application logs: `flyctl logs --app com-geoffjay-admin`
 2. Review this documentation
 3. Consult [Fly.io Community Forum](https://community.fly.io)

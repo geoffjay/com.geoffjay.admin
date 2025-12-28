@@ -112,3 +112,7 @@ CIDR notation is supported (e.g., `192.168.1.0/24`).
 | ---------------------- | ------------------------------------------------ |
 | `ALLOWED_HOME_IP`      | IP address or CIDR allowed external access       |
 | `POCKETBASE_TEST_MODE` | Set to `true` to bypass IP checks (testing only) |
+
+## License
+
+MIT

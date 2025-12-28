@@ -14,6 +14,7 @@ RUN go mod download
 
 # Copy source code
 COPY main.go ./
+COPY migrations/ ./migrations/
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o pocketbase-custom .

@@ -8,11 +8,22 @@ import (
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 	"github.com/pocketbase/pocketbase/tools/hook"
+
+	// Import migrations package to register migrations
+	_ "github.com/geoffjay/admin/migrations"
 )
 
 func main() {
-	app := pocketbase.New()
+	app := pocketbase.NewWithConfig(pocketbase.Config{
+		DefaultDataDir: "pb_data",
+	})
+
+	// Register migrate command with auto-migration in dev
+	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
+		Automigrate: true,
+	})
 
 	// IP allowlist middleware
 	app.OnServe().Bind(&hook.Handler[*core.ServeEvent]{
@@ -36,6 +47,11 @@ func main() {
 }
 
 func isAllowedIP(e *core.RequestEvent) bool {
+	// Bypass IP check in test mode
+	if os.Getenv("POCKETBASE_TEST_MODE") == "true" {
+		return true
+	}
+
 	// Get client IP - RealIP() respects proxy headers
 	clientIP := e.RealIP()
 
